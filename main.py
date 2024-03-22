@@ -15,13 +15,13 @@ def main():
     # File Path to Spotify CSV File
     file_path = "spotify/spotify.csv"
 
-    # Extracts Professor Rachlin's songs of intrest
-    # Songs from the Is This It Album
+    # Extracts Professor Rachlin's songs of intrest: songs from the Is This It Album
     df = neo4j_api.load_data(file_path, 114000)
     songs_of_interest = df[df['album_name'] == 'Is This It']
     rachlin_songs_track_ids = list(set(songs_of_interest['track_id'].tolist()))
 
     # Loading and cleaning the data to a dataframe that will be eventually converted into neo4j
+    # The data is cleaned depending on the songs used for recommending 
     # Note: The function allows for any song (to use for recommending) as input, 
     # just need to pass in valid track_ids as a list for the third parameter
     song_df = neo4j_api.load_data(file_path, 1000, rachlin_songs_track_ids)
@@ -31,7 +31,7 @@ def main():
 
     # Returns the 5 song recommendations for Professor Rachlin based that he likes the Is This It album by The Strokes 
     # Note: The function allows for any song as input, just need to pass in valid track_ids as a list for the second parameter
-    rachlin_recs = neo4j_api.get_recommended_track_names(driver, rachlin_songs_track_ids)
+    rachlin_recs = neo4j_api.get_recommended_tracks(driver, rachlin_songs_track_ids)
     print(rachlin_recs)
 
     # Close the Neo4j driver
