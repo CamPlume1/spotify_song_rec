@@ -38,10 +38,10 @@ def load_data(file_path, size, songs_of_interest=False):
     if songs_of_interest:
         songs_of_interest_df = spotify_df[spotify_df['track_id'].isin(songs_of_interest)]
 
-        # Get the distinct list of artists based on track_ids
+        # Get the distinct list of artists based on songs of interest
         artists_list = spotify_df[spotify_df['track_id'].isin(songs_of_interest)]['artists'].unique()
 
-        # Get the distinct list of track genres based on track_ids
+        # Get the distinct list of track genres based on songs of interest
         genres_list = spotify_df[spotify_df['track_id'].isin(songs_of_interest)]['track_genre'].unique()
 
         # Filter the DataFrame to keep only the rows where an artist wasn't apart of the recommended songs 
@@ -72,6 +72,7 @@ def to_neo4j(df, driver, recommended_songs_track_ids):
     # Iterate over the dataframe's rows and create nodes in Neo4j
     with driver.session() as session:
         for index, row in df.iterrows():
+
             # Construct Cypher query for creating node
             query = """
             CREATE (:Song {
@@ -93,7 +94,8 @@ def to_neo4j(df, driver, recommended_songs_track_ids):
                 liveness: toFloat($liveness),
                 valence: toFloat($valence),
                 tempo: toFloat($tempo),
-                time_signature: toInteger($time_signature)
+                time_signature: toInteger($time_signature),
+                track_genre: $track_genre
             })
             """
 
@@ -117,7 +119,8 @@ def to_neo4j(df, driver, recommended_songs_track_ids):
 
                     # Assures the two song have a decent similarity by making sure they have a close distance 
                     if 0 < distance < 3:
-                        # Create relationship with distance as a property
+
+                        # Cypher query to create relationship with distance as a property
                         create_relationship_query = """
                         MATCH (a:Song {track_id: $current_track_id}), (b:Song {track_id: $other_track_id})
                         CREATE (a)-[:IS_SIMILAR_TO {value: $distance}]->(b)
@@ -129,45 +132,44 @@ def to_neo4j(df, driver, recommended_songs_track_ids):
                     })
 
 # Gets the recommended track names and relationship values given the track_id                  
-def get_recommended_track_names(driver, track_ids):
-
+def get_recommended_tracks(driver, track_ids):
     all_related_tracks = []
 
     with driver.session() as session:
         for track_id in track_ids:
 
-            # Cypher query to find related track names and relationship values where the specific node is pointing to other nodes
+            # Cypher query to find related song information and relationship value where the specific node is pointing to other nodes
             query_outgoing = """
-            MATCH (:Song {track_id: $track_id})-[rel:IS_SIMILAR_TO]->(other:Song)
-            RETURN other.track_name AS related_track_name, rel.value AS relationship_value
+            MATCH (s1:Song {track_id: $track_id})-[rel:IS_SIMILAR_TO]->(s2:Song)
+            RETURN s2.track_name AS related_track_name, s2.artists AS artist, s2.album_name AS album_name, rel.value AS relationship_value
             """
-        
-            # Cypher query to find related track names and relationship values where other nodes are pointing to the specific node
+
+            # Cypher query to find related song information and relationship value where other nodes are pointing to the specific node
             query_incoming = """
-            MATCH (other:Song)-[rel:IS_SIMILAR_TO]->(:Song {track_id: $track_id})
-            RETURN other.track_name AS related_track_name, rel.value AS relationship_value
+            MATCH (s1:Song)-[rel:IS_SIMILAR_TO]->(s2:Song {track_id: $track_id})
+            RETURN s2.track_name AS related_track_name, s2.artists AS artist, s2.album_name AS album_name, rel.value AS relationship_value
             """
-        
+
             # Execute the Cypher queries
             result_outgoing = session.run(query_outgoing, track_id=track_id)
             result_incoming = session.run(query_incoming, track_id=track_id)
-        
-            # Extract related track names and relationship values from the result
-            outgoing_related_tracks = [(record["related_track_name"], record["relationship_value"]) for record in result_outgoing]
-            incoming_related_tracks = [(record["related_track_name"], record["relationship_value"]) for record in result_incoming]
+
+            # Extract related track information and relationship values from the result
+            outgoing_related_tracks = [(record["artist"], record["album_name"], record["related_track_name"], record["relationship_value"]) for record in result_outgoing]
+            incoming_related_tracks = [(record["artist"], record["album_name"], record["related_track_name"], record["relationship_value"]) for record in result_incoming]
 
             # Adds the track recommendations for the current liked track to the list of all recommended tracks
             current_related_tracks = outgoing_related_tracks + incoming_related_tracks
             all_related_tracks.extend(current_related_tracks)
 
         # Sort by most similar
-        all_related_tracks.sort(key=lambda x: x[1])
+        all_related_tracks.sort(key=lambda x: x[3])
 
-        # Drops the relationship value in each tuple so its just track names and drops duplicates 
-        recommended_tracks = [track_name for track_name, value in all_related_tracks]
+        # Drops the relationship value in each tuple so it's just track names and drops duplicates
+        recommended_tracks = [(track_name, artist, album_name) for track_name, artist, album_name, value in all_related_tracks]
         recommended_tracks = list(set(recommended_tracks))
 
-        # Returns the 5 most similar songs 
+        # Returns the 5 most similar songs
         final_recommendations = recommended_tracks[:5]
 
         return final_recommendations
